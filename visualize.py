@@ -995,7 +995,7 @@ class FindBaseline(object):
         self.title = kwargs.get('title', None)
         self.p_val = 5e-5
         self.lam_val = 1e5
-        self.lam1_val = 1e-3
+        self.lam1_val = 1e-2
 
         self.fig = plt.figure(figsize=(14, 10))
         # Add all the axes:
@@ -1019,7 +1019,7 @@ class FindBaseline(object):
                                 valinit=self.lam_val,
                                 orientation='vertical')
         self.lam1slider = Slider(self.axlam1slider, 'lam1-val',
-                                1e-10, 10, valfmt='%.2g',
+                                1e-4, 10, valfmt='%.2g',
                                 valinit=self.lam1_val,
                                 orientation='vertical')
         self.pslider.on_changed(self.blupdate)
@@ -2366,17 +2366,17 @@ class FitParams1(object) :
                                                , p0=self.manualfit_components_params
                                                ,absolute_sigma=False, bounds=self.bounds)
             self.cell_text1 = np.round(self.a,3).reshape(len(self.a)//4,4)
-            self.al_fit = fitting_function(self.x, *self.a)
-            self.errori = self.y.reshape(self.shape)[i] - self.al_fit
-            self.ss_resi = np.matmul(self.errori,self.errori)
-            self.ss_toti = np.matmul(self.y.reshape(self.shape)[i] - np.mean(self.y.reshape(self.shape)[i]),
-                               self.y.reshape(self.shape)[i] - np.mean(self.y.reshape(self.shape)[i]))
+            #self.al_fit = fitting_function(self.x, *self.a)
+            #self.errori = self.y.reshape(self.shape)[i] - self.al_fit
+            #self.ss_resi = np.matmul(self.errori,self.errori)
+            #self.ss_toti = np.matmul(self.y.reshape(self.shape)[i] - np.mean(self.y.reshape(self.shape)[i]),
+            #                   self.y.reshape(self.shape)[i] - np.mean(self.y.reshape(self.shape)[i]))
         
-            self.r_squaredi = 1 - self.ss_resi/self.ss_toti
-            if self.r_squaredi < 0.5 :
-                self.pic_h[i,] = np.array([1,1,1])
-            else :
-                self.pic_h[i,] = self.cell_text1[:,0]
+            #self.r_squaredi = 1 - self.ss_resi/self.ss_toti
+            #if self.r_squaredi < 0.5 :
+            #    self.pic_h[i,] = np.array([1,1,1])
+            #else :
+            self.pic_h[i,] = self.cell_text1[:,0]
         #self.fitting_err = np.sqrt(np.diag(self.b))
         #self.ally_fitted = np.zeros_like(self.y.reshape(y.data.shape))
         #for i in range(50) :
@@ -2540,5 +2540,28 @@ class FitParams1(object) :
          #   self.ax.relim()
           #  self.ax.autoscale_view()
         self.fig.canvas.draw_idle()
-    
+
         
+        
+def pic_ratio(da, pic_h, ratio=None, col_lim = None, scanshape=None,components_sigma=None,
+              **kwargs) :
+    
+    
+    if isinstance(da, xr.DataArray) :
+        
+        spectra = da.data# - da.data.mean())#/da.data.std()
+    
+        shape = da.attrs["ScanShape"] + (-1, )
+        components_sigma = da.shifts.data
+        
+    else :
+        spectra = da
+        shape = scanshape + (-1,)
+        components_sigma = components_sigma
+    
+    pic_ratio = pic_h[:,ratio[0]]/pic_h[:,ratio[1]]
+    visualize_components = AllMaps(pic_ratio.reshape(shape),
+                                     components_sigma=components_sigma,col_lim = col_lim)
+                                           #components=P[:n_components,],
+                                          # var = each_cp_var[0:n_components]*100,
+                                       
