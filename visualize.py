@@ -2249,32 +2249,49 @@ class FitParams(object) :
 
     
 def f_between(peaks_present,para_names,allfitted_params,allstd_err,x) :
+    
+    """This fonction is used to calculate the fitted data, and area under each peak"""
+    
     allyy = np.zeros((peaks_present,len(x)))
+    all_area = np.zeros((peaks_present))
     for i in range(peaks_present):
         
-        fit_res = list(zip(para_names,allfitted_params[i*4:i*4+4],
-                          allstd_err[i*4:i*4+4]))
-        label = [f"{P}={v:.2f}\U000000B1{e:.1f}" for P, v, e in fit_res]
+        #fit_res = list(zip(para_names,allfitted_params[i*4:i*4+4],
+                          # allstd_err[i*4:i*4+4]))
+        #label = [f"{P}={v:.2f}\U000000B1{e:.1f}" for P, v, e in fit_res]
         allyy[i,] = pV(x, *allfitted_params[i*4:i*4+4])
+        all_area[i] = np.trapz(allyy[i,],x)
         #peak_i, = axes.plot(x, yy_i, alpha=0.5, label=label)
         #axes.fill_between(x,yy_i, facecolor=peak_i.get_color(), alpha=0.3)
-    return allyy    
+    return allyy, all_area    
     
     
-def param_values(peaks_present,allfitted_params,allstd_err,axes) :
+def param_values(all_area, peaks_present,allfitted_params,allstd_err,axes) :
+    
+    """This fonction is used to save peak parameters ('Height','Center','FWMH','Ratio G/L','Area')
+    in table and plot it. it return also all peaks height and all peaks area which are
+    used to plot the peak ratio
+    """
     
     rows = ["Peak %d" % i for i in range(peaks_present)]
     cell_text1 = np.round(allfitted_params,3).reshape(len(allfitted_params)//4,4).tolist()
     cell_text2 = np.round(allstd_err,3).reshape(len(allstd_err)//4,4).tolist()
     after = unumpy.uarray(cell_text1,cell_text2)
+    after1 = []
+    cell_text11 = []
+    for i in range(len(after)) :
+        after1.append(np.concatenate((after[i,], np.round(np.array([all_area[i]]),3)),axis=0))
+        cell_text11.append(np.concatenate((np.array(cell_text1)[i,], np.array([all_area[i]])),axis=0))
+    after1 = np.array(after1)  
+    cell_text11 = np.array(cell_text11)
     colors = plt.cm.Greys(np.linspace(0, 0.5, len(rows)))
-    columns = ['Height','Center','FWMH','Ratio G/L']
-    the_table = axes.table(cellText=after,
+    columns = ['Height','Center','FWMH','Ratio G/L','Area']
+    the_table = axes.table(cellText=after1,
                           rowLabels=rows,
                           rowColours = colors,
                           colLabels=columns,
                           loc='bottom',bbox=[0.1, -0.5, 0.9, 0.4]) 
-    return np.array(cell_text1)[:,0]
+    return cell_text11[:,0] , cell_text11[:,4]
 
     
     
@@ -2282,6 +2299,7 @@ def param_values(peaks_present,allfitted_params,allstd_err,axes) :
 class FitParams1(object) :
     '''use this class to show your fitting result. it will also shows a table 
     containing your peaks parameters (center, height...)
+    
     Parameters :
         y : xr.DataArray (your spectra with baseline correction)
         x_size : x point size that you used during your fit
@@ -2292,10 +2310,11 @@ class FitParams1(object) :
     
     
     def __init__(self,input_spectra, x_size, peaks_present, pic, 
-                 sum_peak,pic_h=None, x =None, **kwargs) :
+                 sum_peak, pic_a=None, pic_h=None, x =None, **kwargs) :
         #self.input_spectra = input_spectra
         self.shape = input_spectra.data.shape 
         self.pic_h = pic_h
+        self.pic_a = pic_a
         if isinstance(input_spectra, xr.DataArray) :
             self.y = input_spectra.data
             self.x = input_spectra.shifts.data
@@ -2318,6 +2337,7 @@ class FitParams1(object) :
         self.pic = pic
         self.sum_peak = sum_peak
         self.pic_h = np.zeros((self.y.shape[0],self.peaks_present))
+        self.pic_a = np.zeros((self.y.shape[0],self.peaks_present))
         # create the list of initial parameters from your manual input
         self.manualfit_components_params = copy(list(map(list,zip(
         self.pic['h'], self.pic['x0'], self.pic['w'], self.pic['GL']))))
@@ -2350,7 +2370,6 @@ class FitParams1(object) :
         self.upper_bounds[3::4] = 1
         self.lower_bounds[3::4] = 0
         self.bounds = (self.lower_bounds, self.upper_bounds)
-        # the curve-fitting part : (I choose the means of all spectra)
         #self.allfitted_params = np.zeros((self.y.data.shape[0],len(self.manualfit_components_params)))
         #self.allstd_err = np.zeros_like(self.allfitted_params)
         #self.allcov = np.zeros((self.y.data.shape[0],len(self.manualfit_components_params),
@@ -2360,28 +2379,14 @@ class FitParams1(object) :
                                                ,absolute_sigma=False, bounds=self.bounds)
         self.allstd_err = np.sqrt(np.diag(self.allcov))
         
-        for i in range(self.shape[0]) :
-        
-            self.a, self.b = curve_fit(fitting_function, self.x, self.y.reshape(self.shape)[i], method='trf'
-                                               , p0=self.manualfit_components_params
-                                               ,absolute_sigma=False, bounds=self.bounds)
-            self.cell_text1 = np.round(self.a,3).reshape(len(self.a)//4,4)
-            #self.al_fit = fitting_function(self.x, *self.a)
-            #self.errori = self.y.reshape(self.shape)[i] - self.al_fit
-            #self.ss_resi = np.matmul(self.errori,self.errori)
-            #self.ss_toti = np.matmul(self.y.reshape(self.shape)[i] - np.mean(self.y.reshape(self.shape)[i]),
-            #                   self.y.reshape(self.shape)[i] - np.mean(self.y.reshape(self.shape)[i]))
-        
-            #self.r_squaredi = 1 - self.ss_resi/self.ss_toti
-            #if self.r_squaredi < 0.5 :
-            #    self.pic_h[i,] = np.array([1,1,1])
-            #else :
-            self.pic_h[i,] = self.cell_text1[:,0]
+        # calculate peaks parameters ( height and area for all spectra)
+
         #self.fitting_err = np.sqrt(np.diag(self.b))
         #self.ally_fitted = np.zeros_like(self.y.reshape(y.data.shape))
         #for i in range(50) :
         self.ally_fitted = fitting_function(self.x, *self.allfitted_params)
         self.error = self.y.reshape(self.shape)[0] - self.ally_fitted
+        # calaculate the r_squared of the model
         self.ss_res = np.matmul(self.error,self.error)
         self.ss_tot = np.matmul(self.y.reshape(self.shape)[0] - np.mean(self.y.reshape(self.shape)[0]),
                                self.y.reshape(self.shape)[0] - np.mean(self.y.reshape(self.shape)[0]))
@@ -2411,7 +2416,7 @@ class FitParams1(object) :
         self.y_fittedplot, = self.ax.plot(self.x, self.ally_fitted,'--k',lw=2,alpha=0.6, label = self.label)
         self.ax.legend()
         self.par_nam = ['h', 'x0', 'w', 'G/L']
-        self.allyy = f_between(peaks_present=self.peaks_present,para_names=self.par_nam
+        self.allyy,self.all_area  = f_between(peaks_present=self.peaks_present,para_names=self.par_nam
                   ,allfitted_params=self.allfitted_params,allstd_err=self.allstd_err
                   ,x=self.x)
         self.lineD = []
@@ -2423,10 +2428,45 @@ class FitParams1(object) :
             self.polycol.append(self.fill_b)
         self.ax.set_title('Showing the individual peaks as found by fitting procedure')
         plt.subplots_adjust(left=0.2, bottom=0.3)
-        self.pic_h[0,] = param_values(peaks_present=self.peaks_present
+        self.pic_h[0,], self.pic_a[0,] = param_values(self.all_area, peaks_present=self.peaks_present
                      ,allfitted_params=self.allfitted_params
-                     ,allstd_err=self.allstd_err
-                     ,axes=self.ax) 
+                    ,allstd_err=self.allstd_err
+                    ,axes=self.ax) 
+        
+        
+                
+        for i in range(self.shape[0]) :
+                
+            
+                         
+            self.a, self.b = curve_fit(fitting_function, self.x, self.y.reshape(self.shape)[i], method='trf'
+                                               , p0=self.manualfit_components_params
+                                               ,absolute_sigma=False, bounds=self.bounds)
+            
+                        
+            self.cell_text1 = np.round(self.a,3).reshape(len(self.a)//4,4)
+            self.aly = np.zeros((self.peaks_present,len(self.x)))
+            self.al_area = np.zeros(self.peaks_present)
+            self.cell_text11 = []            
+            for j in range(self.peaks_present):
+                self.aly[j,] = pV(self.x, *self.a[j*4:j*4+4])
+                self.al_area[j] = np.trapz(self.aly[j,],x)
+                self.cell_text11.append(np.concatenate((self.cell_text1[j,], np.array([self.al_area[j]])),axis=0))
+   
+            self.cell_text11 = np.array(self.cell_text11)
+            
+            #self.al_fit = fitting_function(self.x, *self.a)
+            #self.errori = self.y.reshape(self.shape)[i] - self.al_fit
+            #self.ss_resi = np.matmul(self.errori,self.errori)
+            #self.ss_toti = np.matmul(self.y.reshape(self.shape)[i] - np.mean(self.y.reshape(self.shape)[i]),
+            #                   self.y.reshape(self.shape)[i] - np.mean(self.y.reshape(self.shape)[i]))
+        
+            #self.r_squaredi = 1 - self.ss_resi/self.ss_toti
+            #if self.r_squaredi < 0.5 :
+            #    self.pic_h[i,] = np.array([1,1,1])
+            #else :
+            self.pic_h[i,] = self.cell_text1[:,0]
+            self.pic_a[i,] = self.cell_text11[:,4]
         if len(self.y) > 1:
             self.sframe = Slider(self.axframe, 'Frame N°',
                                 self.first_frame, self.last_frame, valfmt = '%d',
@@ -2507,7 +2547,7 @@ class FitParams1(object) :
         self.ax.legend(handles, [f"R² = {np.round(self.r_squared,3)}"])
         self.y_fittedplot.set_ydata(self.current_fit)
         
-        self.current_allyy = f_between(peaks_present=self.peaks_present,para_names=self.par_nam
+        self.current_allyy,self.current_all_area = f_between(peaks_present=self.peaks_present,para_names=self.par_nam
                   ,allfitted_params=self.allfitted_params,allstd_err=self.allstd_err
                   ,x=self.x)
         
@@ -2520,7 +2560,7 @@ class FitParams1(object) :
             self.polycol[i].set_paths([dp.vertices])
             #self.fill_b.set_ydata(self.current_allyy[i,])
         
-        #param_values(peaks_present=self.peaks_present
+        #param_values(all_area=self.current_all_area,peaks_present=self.peaks_present
         #             ,allfitted_params=self.allfitted_params
         #             ,allstd_err=self.allstd_err
         #             ,axes=self.ax) 
@@ -2546,7 +2586,11 @@ class FitParams1(object) :
 def pic_ratio(da, pic_h, ratio=None, col_lim = None, scanshape=None,components_sigma=None,
               **kwargs) :
     
+    """ Use this fonction to plot peaks_ratio using height and area
     
+    pic_h : all peaks height for all spectra
+    
+    """
     if isinstance(da, xr.DataArray) :
         
         spectra = da.data# - da.data.mean())#/da.data.std()
@@ -2559,9 +2603,18 @@ def pic_ratio(da, pic_h, ratio=None, col_lim = None, scanshape=None,components_s
         shape = scanshape + (-1,)
         components_sigma = components_sigma
     
-    pic_ratio = pic_h[:,ratio[0]]/pic_h[:,ratio[1]]
-    visualize_components = AllMaps(pic_ratio.reshape(shape),
-                                     components_sigma=components_sigma,col_lim = col_lim)
+    if len(ratio) == 2 :
+        
+        pic_ratio = pic_h[:,ratio[0]]/pic_h[:,ratio[1]]
+        visualize_components = AllMaps(pic_ratio.reshape(shape),
+                                       components_sigma=components_sigma,col_lim = col_lim)
+    elif len(ratio) > 2 :
+        pic_sum = np.zeros(len(pic_h[:,ratio[0]]))
+        for i in range(len(ratio)-1) :
+            pic_sum += pic_h[:,ratio[i+1]]
+        pic_ratio = pic_h[:,ratio[0]]/pic_sum
+        visualize_components = AllMaps(pic_ratio.reshape(shape),
+                                       components_sigma=components_sigma,col_lim = col_lim)
                                            #components=P[:n_components,],
                                           # var = each_cp_var[0:n_components]*100,
                                        
