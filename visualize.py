@@ -18,6 +18,7 @@ from matplotlib.widgets import (Slider, Button, RadioButtons, SpanSelector,
                                    CheckButtons, MultiCursor, TextBox)
 import calculate as cc
 import preprocessing as pp
+from sklearn import preprocessing
 from read_WDF import get_exif
 from scipy.cluster.hierarchy import dendrogram, linkage, fcluster
 import pandas as pd
@@ -226,7 +227,8 @@ class AllMaps(object):
     """
 
     def __init__(self, input_spectra, sigma=None, components=None,
-                 components_sigma=None, var=None,col_lim=None, **kwargs):
+                 components_sigma=None, var=None,col_lim=None,
+                 line=None,ax2=None,ax=None,im=None,fig=None,**kwargs):
 
         if isinstance(input_spectra, xr.DataArray):
             shape = input_spectra.attrs["ScanShape"]
@@ -242,6 +244,11 @@ class AllMaps(object):
 
         self.first_frame = 0
         self.last_frame = len(self.sigma)-1
+        self.line = line
+        self.ax2 = ax2
+        self.ax = ax
+        self.im = im
+        self.fig = fig
 
         self.components = components
         self.var = var
@@ -2560,10 +2567,10 @@ class FitParams1(object) :
             self.polycol[i].set_paths([dp.vertices])
             #self.fill_b.set_ydata(self.current_allyy[i,])
         
-        #param_values(all_area=self.current_all_area,peaks_present=self.peaks_present
-        #             ,allfitted_params=self.allfitted_params
-        #             ,allstd_err=self.allstd_err
-        #             ,axes=self.ax) 
+        param_values(all_area=self.current_all_area,peaks_present=self.peaks_present
+                     ,allfitted_params=self.allfitted_params
+                     ,allstd_err=self.allstd_err
+                     ,axes=self.ax) 
         #self.pic_h[frame,] = param_values(peaks_present=self.peaks_present
         #             ,allfitted_params=self.allfitted_params
         #             ,allstd_err=self.allstd_err
@@ -2618,3 +2625,150 @@ def pic_ratio(da, pic_h, ratio=None, col_lim = None, scanshape=None,components_s
                                            #components=P[:n_components,],
                                           # var = each_cp_var[0:n_components]*100,
                                        
+
+                    
+                    
+class SVD(object) :
+    
+    """ This class is used to show pca result. 
+    Right click on the score image to show the corresponding spectra
+    
+    Parameters:
+    -----------
+    da: xr.DataArray or a 3D np.ndarray of shape=(ny,nx,shifts)
+        The object containing your input spectra
+    n_components: "mle", float, int or None
+        "mle":
+            The number of components is determined by "mle" algorithm.
+        float:
+            The variance rate covered.
+            The number of components is choosen so to cover the variance rate.
+        int:
+            The number of components to use for pca decomposition
+        None:
+            Choses the minimum between the n_features and n_samples
+        see more in scikit-learn docs for PCA
+    visualize_clean: bool
+        Wheather to visualize the result of cleaning
+    visualize_components: bool
+        Wheather to visualize the decomposition and the components
+    visualize_var: bool
+        Wheather to visualize the scree plot
+    assign: bool
+        Wheather to assign the results of pca decomposition to the returned
+        xr.DataArray.
+        If True, the resulting xr.DataArray will be attributed new coordinates:
+            `pca_comp[N]` along the `"RamanShifts"` dimension, and
+            `pca_comp[N]_coeffs` along the `"points"` dimension
+    Returns:
+    
+        SVD.svd_element  <---- data after SVD, explianed variance, scores array , loadings array
+    --------
+  
+    
+    """
+   
+    def __init__(self, da, n_components=10,    
+                visualize_clean=False, visualize_components=False, visualize_var =False,
+                col_lim = None,scanshape=None,components_sigma=None,
+                feature_range = (-0.05,0.05),**kwargs) :
+        self.da = da
+        self.feature_range = feature_range
+        self.n_components = n_components
+        self.ny, self.nx = self.da.attrs["ScanShape"]
+        if isinstance(self.da, xr.DataArray) :
+            self.spectra = self.da.data.copy()
+            self.shape = self.da.attrs["ScanShape"] + (-1, )
+            self.components_sigma = self.da.shifts.data
+            
+        else :
+            self.spectra = self.da.copy()
+            self.shape = scanshape + (-1,)
+            self.components_sigma = components_sigma
+        
+        self.U, self.A1, self.P = np.linalg.svd(self.spectra, full_matrices=True)
+        self.A = np.zeros((self.spectra.shape[0],self.spectra.shape[1]),dtype=float)
+        np.fill_diagonal(self.A,self.A1)
+        self.R = np.dot(self.U, self.A)
+        self.score = self.R[:,:n_components]
+        self.spectra_recons = np.dot(self.R[:,:n_components],self.P[:n_components,])
+    # remarquer le nombre de variance expliqué par chaque CP
+        self.var_expl = self.A1**2/(self.spectra.shape[0] - 1)
+        self.tot_var_expl = np.sum(self.var_expl)
+        self.each_cp_var = np.round((self.var_expl / self.tot_var_expl),3)
+                #spectra = scaler.transform(da.data)
+        self.L = preprocessing.minmax_scale(self.da.data.copy(), feature_range= feature_range ,axis=-1, copy=False)
+    #n_components = int(pca_fit.n_components_)
+        if visualize_components:
+            self.visualize_components = AllMaps(self.score.reshape(self.shape),
+                                                    components=self.P[:n_components,],
+                                                    var = self.each_cp_var[0:n_components]*100,
+                                                    components_sigma=self.components_sigma,col_lim = col_lim)
+            
+            self.line2, = self.visualize_components.ax2.plot(self.da.shifts.data,self.L[0])
+        #visualize_components.line, = self.visualize_components.ax2.plot(self.da.shifts.data,self.da[0])
+        if hasattr(self.da, 'attrs'):
+            self.da.attrs["score_Components_visu"] = self.visualize_components
+
+   # if visualize_err:
+        #plt.figure()
+        #sqerr = np.sum((spectra - spectra_cleaned)**2, axis=-1)
+        #plt.imshow(sqerr.reshape(da.ScanShape))
+
+        if visualize_clean:
+            
+            self._s = np.stack((self.spectra, self.spectra_recons), axis=-1)
+            self.label = ["original spectra", "svd reconstruction"]
+            self.visualize_result = ShowSpectra(self._s, self.components_sigma,
+                                           label=self.label)
+        if hasattr(self.da, 'attrs'):
+            self.da.attrs["svd_reconstruction_visu"] = self.visualize_result
+           
+        if visualize_var :
+            plt.figure()
+            self.ncomp = np.arange(n_components) + 1
+            plt.plot(self.ncomp, self.each_cp_var[0:n_components], 'o-',linewidth=3,color='green')
+            plt.title('Scree Plot')
+            plt.xlabel('Principal Component')
+            plt.ylabel('Variance Explained')
+            
+            
+        self.visualize_components.fig.canvas.mpl_connect('button_press_event', self.onclick)
+        #self.visualize_components.Line = self.visualize_components.line
+        
+    
+        
+    def onclick(self,event):
+            
+        if event.inaxes == self.visualize_components.ax :
+            if event.button != 1 :
+                x_pos = round(event.xdata)
+                y_pos = round(event.ydata)
+                if isinstance(self.visualize_components.im, mpl.image.AxesImage) : 
+                    if x_pos <= self.nx and y_pos <= self.ny and x_pos * y_pos >=0:
+                        broj = round(y_pos * self.nx + x_pos)
+                        #self.visualize_components.line.set_ydata(self.da.data[broj])
+                        self.line2.set_ydata(self.L[broj])
+                        self.visualize_components.ax2.relim()
+                        self.visualize_components.ax2.autoscale_view()
+                        self.visualize_components.fig.canvas.draw_idle()
+                        #self.sframe.set_val(broj)
+                        #self.scroll_spectra(broj)
+                    elif isinstance(self.visualize_components.im, mpl.lines.Line2D):
+                        broj = x_pos
+                        #self.visualize_components.line.set_ydata(self.da.data[broj])
+                        self.line2.set_ydata(self.L[broj])
+                        self.visualize_components.ax2.relim()
+                        self.visualize_components.ax2.autoscale_view()
+                        self.visualize_components.fig.canvas.draw_idle()
+                        #self.sframe.set_val(broj)
+                        #self.scroll_spectra(broj)
+                else:
+                    pass
+
+    #else:
+    def svd_element(self,da) :
+        n_components = self.n_components
+        return pp.giveback_same(da, self.spectra_recons) ,self.each_cp_var[0:n_components]*100,self.score,self.P[:n_components,]
+        
+ #   return giveback_same(da, spectra_recons) ,each_cp_var[0:n_components]*100,score,P[:n_components,],visualize_components

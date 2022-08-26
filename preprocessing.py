@@ -20,6 +20,10 @@ import calculate as cc
 import visualize as vis
 import matplotlib.pyplot as plt
 from numpy.linalg import norm
+    
+from matplotlib.patches import Ellipse
+from matplotlib.widgets import EllipseSelector
+from matplotlib.patches import Ellipse
 # try:
 #     from sklearnex import patch_sklearn
 #     patch_sklearn()
@@ -146,7 +150,8 @@ def pca_clean(da, n_components='mle', array="Measured", assign=False,
         plt.figure()
         sqerr = np.sum((spectra - spectra_cleaned)**2, axis=-1)
         plt.imshow(sqerr.reshape(da.ScanShape))
-
+        
+ 
     if visualize_clean:
         _s = np.stack((spectra, spectra_cleaned), axis=-1)
         label = ["original spectra", "pca cleaned"]
@@ -258,6 +263,7 @@ def ica_decomp(da, n_components=10, array="Measured", assign=False,
 def svd_decomp(da, n_components=10,
               visualize_clean=False, visualize_components=False,
                col_lim = None,scanshape=None,components_sigma=None,
+               visualize_var=False,
                **kwargs):
     """Clean (smooth) the spectra using PCA.
 
@@ -339,6 +345,15 @@ def svd_decomp(da, n_components=10,
                                            label=label)
         if hasattr(da, 'attrs'):
             da.attrs["svd_reconstruction_visu"] = visualize_result
+            
+    if visualize_var :
+        plt.figure()
+        ncomp = np.arange(n_components) + 1
+        plt.plot(ncomp, each_cp_var[0:n_components], 'o-',linewidth=3,color='green')
+        plt.title('Scree Plot')
+        plt.xlabel('Principal Component')
+        plt.ylabel('Variance Explained')
+
 
     #if assign:
        # da = da.expand_dims({"components_pca": n_components}, axis=1)
@@ -348,10 +363,128 @@ def svd_decomp(da, n_components=10,
                         #      spectra_reduced))
         #return da
     #else:
-    return giveback_same(da, spectra_recons) ,each_cp_var[0:n_components]*100,score
+    return giveback_same(da, spectra_recons) ,each_cp_var[0:n_components]*100,score,P[:n_components,]
 
 
     
+class Score_Plot(object) : 
+    
+    """ this class is used to plot score i  vs score j .
+    
+    Parameters :  
+    
+        input_spectra : initial data or data after PCA
+        scores : array of all scores.
+        score_i : score on x axis
+        score_j : score on y axis
+        
+    return : 
+    
+        score plot and maximum intensity image
+        
+    """
+    
+    def __init__(self,input_spectra,scores,score_i,score_j,**kwargs) : 
+        
+        self.da = input_spectra.copy()
+        self.scores = scores.copy()
+        self.scores1 = scores.copy()
+        self.xmin = self.da.shifts.data.min()
+        self.xmax = self.da.shifts.data.max()
+        self.nshifts = self.da.attrs["PointsPerSpectrum"]
+        self.ny, self.nx = self.da.attrs["ScanShape"]
+        self.scan_type = self.da.attrs["MeasurementType"]
+        self.cmap = kwargs.pop("cmap", "viridis")
+        figsize = kwargs.pop("figsize",(14,8))
+        self.fig = plt.figure(figsize = figsize,**kwargs)
+        #self.fig = plt.figure(**kwargs)
+        self.vline = None
+        self.axscoreplot = self.fig.add_axes([0.05, 0.25, 0.4, 0.6])
+        self.aximg = self.fig.add_axes([0.5, 0.25, 0.4, 0.6])
+                #---------------------------- about labels ---------------------------#
+        try:
+            xlabel = self.da.attrs["ColCoord"]
+            ylabel = self.da.attrs["RowCoord"]
+            if (self.scan_type == "Map") and (self.da.MapAreaType != "Slice"):
+                self.xlabel = f"{xlabel} [{input_spectra[xlabel].units}]"
+                self.ylabel = f"{ylabel} [{input_spectra[ylabel].units}]"
+            else: # Not a map scan
+                self.xlabel = xlabel
+                self.ylabel = ylabel
+        except:
+            self.xlabel = "X"
+            self.ylabel = "Y"
+        #---------------------------------------------------------------------#
+        
+        self.X = score_i
+        self.Y = score_j
+        self.scoreplot = self.axscoreplot.scatter(self.X,self.Y)
+        self.axscoreplot.set_title('Score Plot')
+        self.elps = EllipseSelector(self.axscoreplot, self.oneselect,interactive=True)
+        self.func = "max"
+        if self.scan_type == "Map":
+            self.imup = self.aximg.imshow(cc.calculate_ss(
+                                        self.func,
+                                        self.da),
+                                        interpolation="gaussian",
+                                        aspect=self.nx/self.ny,
+                                        cmap=self.cmap)
+            self.aximg.set_xlabel(f"{self.xlabel}")
+            self.aximg.xaxis.set_label_position('top')
+            self.aximg.set_ylabel(f"{self.ylabel}")
+            try:
+                set_img_coordinates(self.da, self.aximg, unit="")
+            except:
+                pass
+            self.cbar = self.fig.colorbar(self.imup, ax=self.aximg)
+
+        elif self.scan_type == 'Single':
+            self.aximg.axis('off')
+            self.imup = self.aximg.annotate('calculation result', (.4, .8),
+                                        style='italic', fontsize=14,
+                                        xycoords='axes fraction',
+                                        bbox={'facecolor': 'lightcoral',
+                                        'alpha': 0.3, 'pad': 10})
+        else:
+            _length = np.max((self.ny, self.nx))
+            self.imup, = self.aximg.plot(np.arange(_length),
+                                         np.zeros(_length), '--o', alpha=.5)
+        
+        
+    def oneselect(self, eclick, erelease) :
+        
+        if self.vline :
+            self.axscoreplot.lines.remove(self.vline)
+            self.vline = None
+        absc ,ordc = self.elps.center
+        exmin, exmax, eymin, eymax = self.elps.extents
+        width = exmax - exmin
+        height = eymax - eymin
+            
+        ellipse = Ellipse((absc,ordc),width,height)
+            
+        XY = np.asarray((self.X, self.Y)).T
+        inellipse = ellipse.contains_points(XY)
+        X_in = self.scores[:,0][inellipse]
+        self.scores[:,0][inellipse] = 89*np.ones((X_in.shape[0]))
+        img = self.scores[:,0].reshape((self.ny,self.nx))
+        self.scores = self.scores1.copy()
+        if self.scan_type == "Map":
+            self.imup.set_data(img)
+            limits = np.percentile(img, [0, 100])                    
+            self.imup.set_clim(limits)
+            self.cbar.mappable.set_clim(*limits)
+        elif self.scan_type == 'Single':
+            self.imup.set_text(img[0][0])
+        else:
+            self.imup.set_ydata(img.squeeze())
+            self.aximg.relim()
+            self.aximg.autoscale_view(None, False, True)
+        
+        self.fig.canvas.draw_idle()
+   
+    
+
 def select_zone(input_spectra, on_map=False, **kwargs):
     """Isolate the zone of interest in the input spectra.
 
@@ -536,7 +669,8 @@ def remove_CRs(inputspectra, nx=0, ny=0, sensitivity=0.01, width=0.05,
     
     return giveback_same(inputspectra, mock_sp3*area),v
 
-def remove_outliers(inputspectra, nx=0,ny=0,window_size = 5,mode ="mirror",visualize=False,not_spike=[]) :
+def remove_outliers(inputspectra, nx=0,ny=0,window_size = 5,mode ="mirror",visualize=False,not_spike=[],
+                   ScanShape=None,sigma=None) :
     
     """ find outliers and apply median_filter"""
     
@@ -545,8 +679,11 @@ def remove_outliers(inputspectra, nx=0,ny=0,window_size = 5,mode ="mirror",visua
     if isinstance(inputspectra, xr.DataArray):
         spectra = inputspectra.data.copy()
         ny, nx = inputspectra.attrs["ScanShape"]
+        sigma = inputspectra.shifts.data
     else:
-        spectra = inputspectra
+        spectra = inputspectra.copy()
+        ny, nx = ScanShape
+        sigma = sigma
     out = LocalOutlierFactor(n_neighbors =5,n_jobs=-1)
     pred = out.fit_predict(spectra)
     outliers = np.where(pred==-1)[0]
@@ -562,7 +699,7 @@ def remove_outliers(inputspectra, nx=0,ny=0,window_size = 5,mode ="mirror",visua
         pass
     if visualize:
         _s = np.stack((inputspectra[outliers],spectra_med[outliers]), axis=-1)
-        show_result = vis.ShowSpectra(_s, labels=["original", "corrected"],sigma = inputspectra.shifts.data)
+        show_result = vis.ShowSpectra(_s, labels=["original", "corrected"],sigma = sigma)
     
          
     return giveback_same(inputspectra, spectra)
