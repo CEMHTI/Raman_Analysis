@@ -702,7 +702,7 @@ def remove_outliers(inputspectra, nx=0,ny=0,window_size = 5,mode ="mirror",visua
         show_result = vis.ShowSpectra(_s, labels=["original", "corrected"],sigma = sigma)
     
          
-    return giveback_same(inputspectra, spectra)
+    return giveback_same(inputspectra, spectra),outliers
  
 
     

@@ -2675,15 +2675,17 @@ class SVD(object) :
         self.da = da
         self.feature_range = feature_range
         self.n_components = n_components
-        self.ny, self.nx = self.da.attrs["ScanShape"]
+        
         if isinstance(self.da, xr.DataArray) :
             self.spectra = self.da.data.copy()
             self.shape = self.da.attrs["ScanShape"] + (-1, )
+            self.ny, self.nx = self.da.attrs["ScanShape"]
             self.components_sigma = self.da.shifts.data
             
         else :
             self.spectra = self.da.copy()
             self.shape = scanshape + (-1,)
+            self.ny, self.nx = scanshape
             self.components_sigma = components_sigma
         
         self.U, self.A1, self.P = np.linalg.svd(self.spectra, full_matrices=True)
@@ -2697,7 +2699,7 @@ class SVD(object) :
         self.tot_var_expl = np.sum(self.var_expl)
         self.each_cp_var = np.round((self.var_expl / self.tot_var_expl),3)
                 #spectra = scaler.transform(da.data)
-        self.L = preprocessing.minmax_scale(self.da.data.copy(), feature_range= feature_range ,axis=-1, copy=False)
+        self.L = preprocessing.minmax_scale(self.da, feature_range= feature_range ,axis=-1, copy=False)
     #n_components = int(pca_fit.n_components_)
         if visualize_components:
             self.visualize_components = AllMaps(self.score.reshape(self.shape),
@@ -2705,7 +2707,7 @@ class SVD(object) :
                                                     var = self.each_cp_var[0:n_components]*100,
                                                     components_sigma=self.components_sigma,col_lim = col_lim)
             
-            self.line2, = self.visualize_components.ax2.plot(self.da.shifts.data,self.L[0])
+            self.line2, = self.visualize_components.ax2.plot(self.components_sigma,self.L[0])
         #visualize_components.line, = self.visualize_components.ax2.plot(self.da.shifts.data,self.da[0])
         if hasattr(self.da, 'attrs'):
             self.da.attrs["score_Components_visu"] = self.visualize_components
